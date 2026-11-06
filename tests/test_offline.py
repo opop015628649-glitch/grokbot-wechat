@@ -7,7 +7,7 @@ TMP = tempfile.mkdtemp(prefix="bridge-test-")
 os.environ["BRIDGE_DATA_DIR"] = TMP
 os.environ.setdefault("OWNER_NAME", "Tester")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import forward, outbox, media, history, ilink  # noqa: E402
+from grokbot_wechat import forward, outbox, media, history, ilink  # noqa: E402
 
 BJ = ZoneInfo("Asia/Shanghai")
 def bj(*a): return datetime(*a, tzinfo=BJ).timestamp()
@@ -18,10 +18,17 @@ class FakeClock:
 
 class BatcherTest(unittest.TestCase):
     def setUp(self):
+        self._mode = os.environ.get("WECHAT_MODE")
+        os.environ["WECHAT_MODE"] = "bidirectional"
         self.path = os.path.join(TMP, "pending-test.json"); self.hist = os.path.join(TMP, "hist-test.log")
         for p in (self.path, self.hist):
             if os.path.exists(p): os.remove(p)
         self.sent, self.clock = [], FakeClock()
+    def tearDown(self):
+        if self._mode is None:
+            os.environ.pop("WECHAT_MODE", None)
+        else:
+            os.environ["WECHAT_MODE"] = self._mode
     def poster(self, body): self.sent.append(body); return (200, "ok")
     def mk(self, **kw): return forward.Batcher(self.path, quiet=3, cap=60, poster=self.poster, clock=self.clock,
                                                history_path=self.hist, **kw)
@@ -53,8 +60,17 @@ class BatcherTest(unittest.TestCase):
 
 class NudgeTest(unittest.TestCase):
     def setUp(self):
+        self._mode = os.environ.get("WECHAT_MODE")
+        self._send = outbox.send_text
+        os.environ["WECHAT_MODE"] = "bidirectional"
         self.calls = []
         outbox.send_text = lambda text, **kw: (self.calls.append(text) or ("{}", False))
+    def tearDown(self):
+        outbox.send_text = self._send
+        if self._mode is None:
+            os.environ.pop("WECHAT_MODE", None)
+        else:
+            os.environ["WECHAT_MODE"] = self._mode
     def state(self, last):
         ilink.save_state({"last_inbound_ms": int(last * 1000)})
     def test_normal_window_nudges_at_18h(self):

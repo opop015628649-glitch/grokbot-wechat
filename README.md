@@ -9,6 +9,8 @@
 
 纯 Python 标准库 + `cryptography`（媒体解密）+ `qrcode`（绑定二维码），没有框架，没有服务器，适合跑在 Grok Bot 的 box 或任何一台常开的 Linux / macOS 机器上。
 
+**默认是只入站。** 不设置 `WECHAT_MODE`，或设为 `inbound` 时，转发器会长轮询并 POST 到 Webhook，但不会调用微信 `sendmessage`、输入状态、主动 nudge，也不会把 `outbox.json` 里的旧消息发出去。要恢复以前的发送行为，必须在进程环境里显式写 `WECHAT_MODE=bidirectional`。绑定命令不会把扫码链接或 token 打到终端，也不会写 `qr_url.txt`；等待扫码期间只在数据目录留下权限 `0600` 的 `qr.png`。数据目录从创建起是 `0700`。
+
 > iLink 协议细节参考 [chihao.li 的拆解](https://chihao.li/blog/en/wechat-clawbot-ilink-protocol) 和腾讯的
 > `@tencent-weixin/openclaw-weixin` npm 包。ClawBot 是官方功能（有服务条款），不是 hook / 逆向客户端。
 
@@ -117,37 +119,40 @@
 
 要求：Python 3.9+（用到 `zoneinfo`），能开 ClawBot 插件的微信（发布时为 iOS 微信 8.0.70+，灰度中），一个 Grok Bot 账号。
 
+可安装包是 wheel，不必克隆仓库。开发树里也可以 `pip install -e .`。
+
 ```bash
-git clone https://github.com/psylch/grokbot-wechat.git && cd grokbot-wechat
-pip install -r requirements.txt
-cp .env.example .env            # 先空着 webhook，下一步再填
+python3 -m venv ~/.grokbot-wechat-venv
+~/.grokbot-wechat-venv/bin/pip install grokbot_wechat-*.whl
+export BRIDGE_DATA_DIR="$HOME/.grokbot-wechat"
+# 绑定还不需要 Webhook。确认扫码成功之后，再把 URL / key 放进这个目录。
+~/.grokbot-wechat-venv/bin/grokbot-wechat-bind
 ```
 
-1. **绑定微信**：`python3 bind.py` → 用微信扫生成的 `qr.png`（或打开 `qr_url.txt` 里的链接）→ 手机上确认。
-   成功后生成 `credentials.json`（权限 600，**绝不能提交**）。二维码过期会自动刷新；手机显示数字时，
-   把数字写进同目录的 `verify_code.txt`。
+1. **绑定微信**：运行上面的 `grokbot-wechat-bind`。等待期间用微信扫描 `$BRIDGE_DATA_DIR/qr.png`。
+   终端不会打印链接。确认成功或失败退出后，程序删除 `qr.png`。成功后生成 `credentials.json`（从创建起就是 `0600`，**绝不能提交**）。
+   手机显示数字时，把数字写进同目录的 `verify_code.txt`。
 2. **建入站 routine**：Grok Bot 里新建 routine，触发方式 Webhook，指令用 `routines/inbound-webhook.md`
    （把里面的路径换成你的）。把 URL 和 key 填进 `.env`。
-3. **自检**：`python3 forward.py --selftest` 应该返回 `(200, ...)`，routine 会收到一条测试消息。
-4. **启动**：`nohup setsid ./run_forward.sh >/dev/null 2>&1 &`，看 `tail -f forward.log`。在微信里给 ClawBot 发一句话试试。
-5. **看门狗**：建一个每 15 分钟的定时 routine（`routines/watchdog.md`），或 cron：
-   `*/15 * * * * /path/to/grokbot-wechat/watchdog.sh >> /path/to/watchdog.log 2>&1`
-6. **主动推送**：其他 routine（日报、提醒）里让 agent 调 `python3 send.py --app "…"`；exit 3 表示已排队，不用重试。
+3. **自检**：URL 和 key 都放进数据目录之后，`grokbot-wechat-forward --selftest` 才会向 Webhook 发一条测试。这不是微信消息。
+4. **启动**：`grokbot-wechat-forward`。默认只入站。日志在 `$BRIDGE_DATA_DIR/forward.log`。
+5. **看门狗**：源码树里的 `watchdog.sh` 仍可用；安装包本身不带看门狗。
+6. **主动推送**：只有显式 `WECHAT_MODE=bidirectional` 时 `grokbot-wechat-send` 才会发送。默认模式下它退出码 **5**，什么都不发。
 
 离线测试（不连网）：`python3 -m unittest discover -s tests -v`
 
 ### 文件一览
 | 文件 | 作用 |
 |---|---|
-| `forward.py` | 常驻转发器：轮询、去重、媒体、批处理 POST、outbox 线程 |
-| `outbox.py` | 推送失败排队 / 补发、keep-alive nudge、免打扰 |
-| `send.py` | agent 用的发送命令（可打断、排队）|
-| `ilink.py` | 最小 iLink 客户端（`post` / `send_text` / state 读写）|
-| `media.py` | 媒体摘要、CDN 下载、AES 解密 |
-| `history.py` | 滚动对话记录 `history.log`（2000 行时截到 1000）|
-| `bind.py` | 扫码绑定，生成 `credentials.json` |
-| `poll.py` | 调试用的一次性轮询（**转发器运行时别用**）|
-| `config.py` | 读 `.env` / 环境变量 |
+| `grokbot_wechat/forward.py` | 常驻转发器：轮询、去重、媒体、批处理 POST。outbox 线程只在 bidirectional 时启动 |
+| `grokbot_wechat/outbox.py` | 推送失败排队 / 补发、keep-alive nudge。只入站时这些函数直接返回 |
+| `grokbot_wechat/send.py` | 发送命令。默认退出码 5，不发送 |
+| `grokbot_wechat/ilink.py` | iLink 客户端。版本与请求头按官方 2.4.10 公开实现 |
+| `grokbot_wechat/media.py` | 媒体摘要、CDN 下载、AES 解密 |
+| `grokbot_wechat/history.py` | 滚动对话记录 `history.log`（2000 行时截到 1000）|
+| `grokbot_wechat/bind.py` | 扫码绑定，生成 `credentials.json` 和等待期间的 `qr.png` |
+| `grokbot_wechat/poll.py` | 调试用的一次性轮询（**转发器运行时别用**；不打印 context token）|
+| `grokbot_wechat/config.py` | 读环境变量 / 数据目录里的 `.env` |
 | `run_forward.sh` / `watchdog.sh` | 内层 / 外层看门狗 |
 | `routines/` | Grok Bot routine 指令模板 |
 
@@ -204,8 +209,10 @@ webhook routine, so WeChat becomes a chat front-end for your agent.
 - **Secrets are not included**: run `bind.py` to get your own `credentials.json`; put your webhook URL/key in `.env`
   (see `.env.example`). Runtime state, logs and media are git-ignored.
 
-Setup: `pip install -r requirements.txt` → `python3 bind.py` (scan QR) → create a webhook routine
-(`routines/inbound-webhook.md`) → fill `.env` → `python3 forward.py --selftest` → `nohup setsid ./run_forward.sh &`
+Default mode is inbound-only (`WECHAT_MODE` unset or `inbound`): no WeChat send, nudge, or outbox flush. `WECHAT_MODE=bidirectional` restores sends. Bind writes a mode-0600 `qr.png` and does not print the login URL.
+
+Setup: install the wheel → `grokbot-wechat-bind` (scan `qr.png`) → create a webhook routine
+(`routines/inbound-webhook.md`) → put the webhook URL and key in the data directory → `grokbot-wechat-forward` (inbound-only unless `WECHAT_MODE=bidirectional`)
 → schedule `watchdog.sh` every 15 min. Offline tests: `python3 -m unittest discover -s tests -v`.
 
 Protocol credits: [chihao.li — WeChat ClawBot iLink protocol breakdown](https://chihao.li/blog/en/wechat-clawbot-ilink-protocol),
