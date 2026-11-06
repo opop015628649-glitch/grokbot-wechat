@@ -12,9 +12,9 @@ reason=""
 pid="$(cat "$DATA/forward.pid" 2>/dev/null)"
 if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null || ! tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q run_forward.sh; then
   reason="run_forward.sh not running"
-elif ! pgrep -P "$pid" -f forward.py >/dev/null; then
-  reason="forward.py not running"   # normally restarted within 5s by run_forward.sh; give it one more look
-  sleep 8; pgrep -P "$pid" -f forward.py >/dev/null && reason=""
+elif ! pgrep -P "$pid" -f grokbot_wechat.forward >/dev/null; then
+  reason="grokbot_wechat.forward not running"   # normally restarted within 5s by run_forward.sh; give it one more look
+  sleep 8; pgrep -P "$pid" -f grokbot_wechat.forward >/dev/null && reason=""
 fi
 if [ -z "$reason" ] && [ -f "$DATA/forward.heartbeat" ]; then
   age=$(( $(date +%s) - $(cat "$DATA/forward.heartbeat" 2>/dev/null || echo 0) ))
@@ -32,7 +32,7 @@ here="$(pwd -P)"
 if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q run_forward.sh; then
   kill "$pid" 2>/dev/null
 fi
-for p in $(pgrep -f "forward.py"); do
+for p in $(pgrep -f "grokbot_wechat.forward"); do
   [ "$(readlink "/proc/$p/cwd" 2>/dev/null)" = "$here" ] && kill "$p" 2>/dev/null
 done
 sleep 2

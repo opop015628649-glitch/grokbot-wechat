@@ -6,7 +6,7 @@ cd "$(dirname "$(readlink -f "$0")")" || exit 1
 LOGDIR="${BRIDGE_DATA_DIR:-.}"
 echo $$ > "$LOGDIR/forward.pid"
 while true; do
-  python3 -u forward.py >> "$LOGDIR/forward.out" 2>&1
+  python3 -u -m grokbot_wechat.forward >> "$LOGDIR/forward.out" 2>&1
   echo "$(date '+%F %T') forward.py exited ($?), restarting in 5s" >> "$LOGDIR/forward.log"
   sleep 5
 done

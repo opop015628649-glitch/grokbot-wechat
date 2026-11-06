@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "grokbot-wechat"
+version = "0.2.0"
+description = "Inbound-first WeChat iLink bridge that delivers messages to a Grok Bot webhook"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+dependencies = [
+  "cryptography>=41",
+  "qrcode[pil]>=7",
+]
+
+[project.scripts]
+grokbot-wechat-bind = "grokbot_wechat.bind:cli"
+grokbot-wechat-forward = "grokbot_wechat.forward:cli"
+grokbot-wechat-send = "grokbot_wechat.send:cli"
+
+[tool.setuptools]
+packages = ["grokbot_wechat"]
